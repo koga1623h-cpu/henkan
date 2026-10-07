@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Excel/CSV→JSON変換</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<style>body{font-family:sans-serif;padding:24px;max-width:480px;margin:auto}input,button{width:100%;font-size:16px;padding:12px;margin:8px 0;box-sizing:border-box}#log{white-space:pre-wrap;font-size:14px}</style>
+</head><body>
+<h3>旧版Excel/CSV → FieldNote JSON</h3>
+<input id="who" placeholder="PT訪問者名（誰のデータか）">
+<input type="file" id="file" accept=".xlsx,.csv">
+<button onclick="convert()">変換してJSON保存</button>
+<div id="log"></div>
+<script>
+const ITEMS = [['bed','ベッド'],['round','ラウンド'],['survey','施設環境調査'],['mattress','マットレス'],['other','他社情報'],['comm','見守り機器'],['bath','浴室機器'],['tv','TV'],['beds_cut','病床削減']];
+const FLAGS = [['propose','要提案'],['estimate','見積依頼'],['replace','更新検討'],['watch','要観察']];
+const S = x => String(x ?? '').trim();
+function hash(s){let h=0;for(const c of s)h=(h*31+c.codePointAt(0))|0;return(h>>>0).toString(36);}
+function toVisit(r, reporter, ref){
+  const facility = S(r['施設']);
+  let y, mo, d;
+  const m = S(r['日付']).match(/(\d{4})\D(\d{1,2})\D(\d{1,2})/);
+  const c = S(r['日時']).match(/^(\d{1,2})\/(\d{1,2})/);
+  if (m) { y = m[1]; mo = m[2]; d = m[3]; }
+  else if (c) { mo = c[1]; d = c[2]; y = String(+mo > ref.m ? ref.y - 1 : ref.y); }
+  if (!facility || !y) return null;
+  mo = mo.padStart(2,'0'); d = d.padStart(2,'0');
+  const items = {};
+  ITEMS.forEach(([id,label])=>{
+    const l = label in r ? label : (id==='other' && 'その他' in r ? 'その他' : label);
+    items[id] = {checked:S(r[l])==='○', note:S(r[l+'_メモ'])};
+  });
+  const ft = S(r['つなぐ'] || r['つなぐ（共有事項）']);
+  const v = {facility,reporter,pref:'',contact:S(r['担当者']),mainWork:S(r['訪問理由']),
+    renewalPlan:S(r['更新計画']),remarks:S(r['備考']),flagMemo:S(r['共有メモ']),memo:S(r['メモ']),
+    hypothesis:'',hypothesisResult:null,items,
+    flags:Object.fromEntries(FLAGS.map(([id,l])=>[id,ft.includes(l)])),
+    dateKey:`${y}-${mo}-${d}`,yearMonth:`${y}-${mo}`,datetime:`${+mo}/${+d}`};
+  v.id = 'x'+hash([v.dateKey,facility,v.mainWork,v.flagMemo,v.memo].join('|'));
+  return v;
+}
+function convert(){
+  const f = document.getElementById('file').files[0];
+  const who = S(document.getElementById('who').value);
+  const log = document.getElementById('log');
+  if (!f || !who) { log.textContent = '名前とファイルを指定してください'; return; }
+  const isCSV = /\.csv$/i.test(f.name);
+  const fm = f.name.match(/(20\d{2})-?(\d{2})/);
+  const now = new Date();
+  const ref = fm ? {y:+fm[1], m:+fm[2]} : {y:now.getFullYear(), m:now.getMonth()+1};
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const wb = isCSV
+        ? XLSX.read(rd.result.replace(/^\uFEFF/,''), {type:'string', raw:true})
+        : XLSX.read(rd.result, {type:'array'});
+      const ws = wb.Sheets['訪問記録'] || wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {defval:'', raw:false});
+      const visits = rows.map(r => toVisit(r, who, ref)).filter(Boolean);
+      const skipped = rows.length - visits.length;
+      const blob = new Blob([JSON.stringify({exportedAt:new Date().toISOString(),version:1,visits},null,2)],{type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `fieldnote_${who}_変換.json`;
+      a.click();
+      log.textContent = `${visits.length}件を変換しました${skipped ? `\n（日付か施設が空の${skipped}行はスキップ）` : ''}${isCSV && !fm ? '\n※ファイル名に日付がないため、年は今日を基準に推測しました' : ''}`;
+    } catch (e) { log.textContent = '読み込み失敗：' + e.message; }
+  };
+  isCSV ? rd.readAsText(f) : rd.readAsArrayBuffer(f);
+}
+</script></body></html>
