@@ -8,7 +8,8 @@
 <h3>旧版Excel/CSV → FieldNote JSON</h3>
 <input id="who" placeholder="PT訪問者名（誰のデータか）">
 <input type="file" id="file" accept=".xlsx,.csv">
-<button onclick="convert()">変換してJSON保存</button>
+<button onclick="convert()">変換する</button>
+<button id="save" style="display:none" onclick="saveFile()">保存先を選んで保存</button>
 <div id="log"></div>
 <script>
 const ITEMS = [['bed','ベッド'],['round','ラウンド'],['survey','施設環境調査'],['mattress','マットレス'],['other','他社情報'],['comm','見守り機器'],['bath','浴室機器'],['tv','TV'],['beds_cut','病床削減']];
@@ -38,10 +39,24 @@ function toVisit(r, reporter, ref){
   v.id = 'x'+hash([v.dateKey,facility,v.mainWork,v.flagMemo,v.memo].join('|'));
   return v;
 }
+let outFile = null;
+function saveFile(){
+  if (!outFile) return;
+  if (navigator.canShare && navigator.canShare({files:[outFile]})) {
+    navigator.share({files:[outFile]}).catch(()=>{});
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(outFile);
+    a.download = outFile.name;
+    a.click();
+  }
+}
 function convert(){
   const f = document.getElementById('file').files[0];
   const who = S(document.getElementById('who').value);
   const log = document.getElementById('log');
+  document.getElementById('save').style.display = 'none';
+  outFile = null;
   if (!f || !who) { log.textContent = '名前とファイルを指定してください'; return; }
   const isCSV = /\.csv$/i.test(f.name);
   const fm = f.name.match(/(20\d{2})-?(\d{2})/);
@@ -58,10 +73,8 @@ function convert(){
       const visits = rows.map(r => toVisit(r, who, ref)).filter(Boolean);
       const skipped = rows.length - visits.length;
       const blob = new Blob([JSON.stringify({exportedAt:new Date().toISOString(),version:1,visits},null,2)],{type:'application/json'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `fieldnote_${who}_変換.json`;
-      a.click();
+      outFile = new File([blob], `fieldnote_${who}_変換.json`, {type:'application/json'});
+      document.getElementById('save').style.display = visits.length ? 'block' : 'none';
       log.textContent = `${visits.length}件を変換しました${skipped ? `\n（日付か施設が空の${skipped}行はスキップ）` : ''}${isCSV && !fm ? '\n※ファイル名に日付がないため、年は今日を基準に推測しました' : ''}`;
     } catch (e) { log.textContent = '読み込み失敗：' + e.message; }
   };
